@@ -1,0 +1,23 @@
+syntax = "proto3";
+
+package lead;
+
+service LeadStreamService {
+  // Server-side streaming RPC (note the 'stream' keyword in returns)
+  rpc StreamNewLeads (StreamLeadsRequest) returns (stream LeadResponse);
+}
+
+message StreamLeadsRequest {
+  string filter_category = 1; // Optional filter (e.g. "Vehicles", "Real Estate")
+}
+
+message LeadResponse {
+  string lead_id = 1;
+  string user_id = 2;
+  string user_phone = 3;
+  string post_id = 4;
+  string post_title = 5;
+  double price = 6;
+  string category = 7;
+  string created_at = 8;
+}

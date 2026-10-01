@@ -1,0 +1,514 @@
+{
+  "info": {
+    "_postman_id": "a1f4c2e0-6b3d-4f8a-9c21-7e5d8b0a1234",
+    "name": "gRPC Lead System (Post System + CRM)",
+    "description": "Full CRUD for the Post System + read endpoint for the CRM, plus gRPC stream setup.\n\nPost System routes: POST/GET /posts, GET/PATCH/DELETE /posts/:id, POST/GET /users, GET/PATCH/DELETE /users/:id.\n\n--- gRPC streaming (set up once in Postman) ---\nPostman's JSON collection format cannot carry gRPC requests, so add it manually:\n1. New > gRPC\n2. Server URL: localhost:50051\n3. Select proto file: proto/lead.proto (from this repo)\n4. Method: LeadStreamService > StreamNewLeads\n5. Message tab: {\"filter_category\": \"Vehicles\"}  (or \"\" for all leads)\n6. Invoke, then POST a new ad below and watch messages stream in.\n\nChaining: 'Create Post' saves the new id to {{post_id}}; 'Create User' saves to {{test_user_id}}. Run those before the by-id Update/Delete requests.\n\nNotes:\n- CRM is queried via 127.0.0.1 (your Nuxt dev server owns localhost:3001 on IPv6).\n- {{user_id}} is the seeded seller (user-uuid-123) and always exists.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Post System — Posts (HTTP :3000)",
+      "item": [
+        {
+          "name": "Create Post (Vehicles)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 201 Created', () => pm.response.to.have.status(201));",
+                  "const body = pm.response.json();",
+                  "pm.test('Post has an id', () => pm.expect(body.id).to.be.a('string'));",
+                  "pm.collectionVariables.set('post_id', body.id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"2024 Lexus LX600 Pristine Condition\",\n  \"price\": 185000,\n  \"category\": \"Vehicles\",\n  \"userId\": \"{{user_id}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{post_system_url}}/posts",
+              "host": ["{{post_system_url}}"],
+              "path": ["posts"]
+            },
+            "description": "Creates an ad, then stores its id in {{post_id}} for the Get/Update/Delete by-id requests. Also broadcasts to every connected gRPC stream."
+          },
+          "response": []
+        },
+        {
+          "name": "Create Post (Real Estate — filtered-out test)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 201 Created', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('post_id', pm.response.json().id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"2-Bedroom Condo BKK1\",\n  \"price\": 120000,\n  \"category\": \"Real Estate\",\n  \"userId\": \"{{user_id}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{post_system_url}}/posts",
+              "host": ["{{post_system_url}}"],
+              "path": ["posts"]
+            },
+            "description": "Use with a gRPC stream filtered on 'Vehicles' — this lead must NOT arrive."
+          },
+          "response": []
+        },
+        {
+          "name": "Get All Posts",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('Response is a non-empty array of posts', () => {",
+                  "  const posts = pm.response.json();",
+                  "  pm.expect(posts).to.be.an('array');",
+                  "  pm.expect(posts.length).to.be.above(0);",
+                  "  pm.expect(posts[0]).to.have.property('title');",
+                  "  pm.expect(posts[0]).to.have.property('user');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{post_system_url}}/posts",
+              "host": ["{{post_system_url}}"],
+              "path": ["posts"]
+            },
+            "description": "Lists all posts (newest first) with their owning user."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Post by Id",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('Returns the requested post', () => {",
+                  "  pm.expect(pm.response.json().id).to.eql(pm.collectionVariables.get('post_id'));",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{post_system_url}}/posts/{{post_id}}",
+              "host": ["{{post_system_url}}"],
+              "path": ["posts", "{{post_id}}"]
+            },
+            "description": "Uses {{post_id}} (defaults to a known seeded post; updated automatically when you run 'Create Post'). Unknown id returns 404."
+          },
+          "response": []
+        },
+        {
+          "name": "Update Post (PATCH)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('Changes were applied', () => {",
+                  "  const b = pm.response.json();",
+                  "  pm.expect(b.price).to.eql(189500);",
+                  "  pm.expect(b.title).to.include('updated');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"2024 Lexus LX600 (updated)\",\n  \"price\": 189500\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{post_system_url}}/posts/{{post_id}}",
+              "host": ["{{post_system_url}}"],
+              "path": ["posts", "{{post_id}}"]
+            },
+            "description": "Partial update — send only the fields you want to change (title, price, category). Updates do NOT re-broadcast to the gRPC stream (it carries new leads only)."
+          },
+          "response": []
+        },
+        {
+          "name": "Delete Post",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('Returns the deleted post', () => pm.expect(pm.response.json().id).to.eql(pm.collectionVariables.get('post_id')));",
+                  "pm.test('Follow-up GET returns 404', () => {",
+                  "  pm.sendRequest(pm.collectionVariables.get('post_system_url') + '/posts/' + pm.collectionVariables.get('post_id'), (err, res) => {",
+                  "    pm.expect(res.code).to.eql(404);",
+                  "  });",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{post_system_url}}/posts/{{post_id}}",
+              "host": ["{{post_system_url}}"],
+              "path": ["posts", "{{post_id}}"]
+            },
+            "description": "Deletes {{post_id}} permanently. Run 'Create Post' first if you don't want to delete an existing ad."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Post System — Users (HTTP :3000)",
+      "item": [
+        {
+          "name": "Create User",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 201 Created', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('test_user_id', pm.response.json().id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Test Agent\",\n  \"phone\": \"+85512345679\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{post_system_url}}/users",
+              "host": ["{{post_system_url}}"],
+              "path": ["users"]
+            },
+            "description": "Creates a seller and stores the id in {{test_user_id}} (used by Update/Delete User)."
+          },
+          "response": []
+        },
+        {
+          "name": "Get All Users",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('Each user has a post count', () => {",
+                  "  const users = pm.response.json();",
+                  "  pm.expect(users).to.be.an('array');",
+                  "  pm.expect(users[0]._count).to.have.property('posts');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{post_system_url}}/users",
+              "host": ["{{post_system_url}}"],
+              "path": ["users"]
+            },
+            "description": "Lists users with how many posts each one owns."
+          },
+          "response": []
+        },
+        {
+          "name": "Get User by Id (seeded seller)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('Is the seeded seller', () => pm.expect(pm.response.json().id).to.eql(pm.collectionVariables.get('user_id')));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{post_system_url}}/users/{{user_id}}",
+              "host": ["{{post_system_url}}"],
+              "path": ["users", "{{user_id}}"]
+            },
+            "description": "Fetches the seeded seller (user-uuid-123) with post count."
+          },
+          "response": []
+        },
+        {
+          "name": "Update User (PATCH)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('Name was changed', () => pm.expect(pm.response.json().name).to.eql('Renamed Agent'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Renamed Agent\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{post_system_url}}/users/{{test_user_id}}",
+              "host": ["{{post_system_url}}"],
+              "path": ["users", "{{test_user_id}}"]
+            },
+            "description": "Run 'Create User' first — this updates {{test_user_id}}, not the seeded seller."
+          },
+          "response": []
+        },
+        {
+          "name": "Delete User With Posts (expect 409)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 409 Conflict (guarded)', () => pm.response.to.have.status(409));",
+                  "pm.test('Explains the guard', () => pm.expect(pm.response.json().message).to.include('still reference'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{post_system_url}}/users/{{user_id}}",
+              "host": ["{{post_system_url}}"],
+              "path": ["users", "{{user_id}}"]
+            },
+            "description": "Deleting the seeded seller is blocked while their posts exist — proves referential integrity is enforced (409 Conflict)."
+          },
+          "response": []
+        },
+        {
+          "name": "Delete User (throwaway)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200 OK', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{post_system_url}}/users/{{test_user_id}}",
+              "host": ["{{post_system_url}}"],
+              "path": ["users", "{{test_user_id}}"]
+            },
+            "description": "Run 'Create User' first — deletes the throwaway user created by this collection."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "CRM System (HTTP :3001)",
+      "item": [
+        {
+          "name": "Get All Leads",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('Response is an array', () => pm.expect(pm.response.json()).to.be.an('array'));",
+                  "pm.test('Leads arrive without CRM polling', () => {",
+                  "  const leads = pm.response.json();",
+                  "  if (leads.length > 0) {",
+                  "    pm.expect(leads[0]).to.have.property('postTitle');",
+                  "    pm.expect(leads[0]).to.have.property('status');",
+                  "  }",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{crm_system_url}}/leads",
+              "host": ["{{crm_system_url}}"],
+              "path": ["leads"]
+            },
+            "description": "Leads that arrived automatically via the gRPC server-side stream. Uses 127.0.0.1 to avoid the Nuxt dev server on localhost:3001."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "gRPC (manual — Postman JSON cannot store gRPC)",
+      "item": [
+        {
+          "name": "StreamNewLeads — setup instructions",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "https://learning.postman.com/docs/use/send-requests/protocols/grpc/grpc-request-interface",
+              "protocol": "https",
+              "host": ["learning", "postman", "com"],
+              "path": ["docs", "use", "send-requests", "protocols", "grpc", "grpc-request-interface"]
+            },
+            "description": "Placeholder (ignore its URL). Do this instead:\n\n1. Postman: New > gRPC\n2. Server URL: localhost:50051\n3. Attach proto file: proto/lead.proto\n4. Select method: LeadStreamService.StreamNewLeads\n5. Message:\n{\n  \"filter_category\": \"\"\n}\n   (\"\" = all leads, or \"Vehicles\" / \"Real Estate\" to filter)\n6. Click Invoke — connection stays open.\n7. Run 'Create Post' above → the new lead appears in the stream within milliseconds.\n\nWhile connected, the Post System logs:\n[gRPC Server] CRM client connected. Filter category: \"...\""
+          },
+          "response": []
+        }
+      ]
+    }
+  ],
+  "variable": [
+    {
+      "id": "post_system_url",
+      "key": "post_system_url",
+      "value": "http://localhost:3000",
+      "type": "string"
+    },
+    {
+      "id": "crm_system_url",
+      "key": "crm_system_url",
+      "value": "http://127.0.0.1:3001",
+      "type": "string"
+    },
+    {
+      "id": "user_id",
+      "key": "user_id",
+      "value": "user-uuid-123",
+      "type": "string"
+    },
+    {
+      "id": "post_id",
+      "key": "post_id",
+      "value": "77c30bc2-0867-455a-bbfa-1c124f3035f1",
+      "type": "string"
+    },
+    {
+      "id": "test_user_id",
+      "key": "test_user_id",
+      "value": "",
+      "type": "string"
+    }
+  ]
+}

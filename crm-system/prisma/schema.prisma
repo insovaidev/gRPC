@@ -1,0 +1,20 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model CrmLead {
+  id           String   @id @default(uuid())
+  postSystemId String   @unique
+  userId       String
+  userPhone    String
+  postTitle    String
+  price        Float
+  category     String
+  status       String   @default("NEW")
+  createdAt    DateTime @default(now())
+}
